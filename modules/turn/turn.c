@@ -190,7 +190,7 @@ static bool indication_handler(struct restund_msgctx *ctx, int proto,
 	if (restund_addr_is_blocked(psa))
 		err = EPERM;
 	else
-		err = udp_send(al->rel_us, psa, &data->v.data);
+		err = udp_send(al->uks->rel_us, psa, &data->v.data);
 	if (err)
 		turnd.errc_tx++;
 	else {
@@ -243,7 +243,7 @@ static bool raw_handler(int proto, const struct sa *src,
 	if (restund_addr_is_blocked(psa))
 		err = EPERM;
 	else
-		err = udp_send(al->rel_us, psa, mb);
+		err = udp_send(al->uks->rel_us, psa, mb);
 	if (err)
 		turnd.errc_tx++;
 	else {
@@ -341,21 +341,40 @@ static void tmr_handler(void *arg)
 {
 	struct tmr *tmr = arg;
 	struct le *le;
+	int thrd_id;
 
 	mtx_lock(&turndp()->mutex);
 	if (!turndp()->run)
 		re_cancel();
 
+	thrd_id = GetThreadId(thrd_current());
+
 	/* Reassign one allocation by time */
 	LIST_FOREACH(&turndp()->re_map, le)
 	{
-		struct allocation *al = le->data;
+		struct allocation *al = list_ledata(le);
 		mtx_lock(&al->mutex);
-		udp_thread_attach(al->rel_us);
-		udp_thread_attach(al->rsv_us);
+		udp_thread_attach(al->uks->rel_us);
+		udp_thread_attach(al->uks->rsv_us);
+		al->uks->thrd_id = thrd_id;
+		
 		mtx_unlock(&al->mutex);
 	}
 	list_clear(&turndp()->re_map);
+
+	le = list_head(&turndp()->rm_map);
+	while (le)
+	{
+		struct udp_socks *uks = list_ledata(le);
+		le = le->next;
+		if (thrd_id == uks->thrd_id) {
+			udp_thread_detach(uks->rel_us);
+			udp_thread_detach(uks->rsv_us);
+
+			list_unlink(&uks->le);
+			mem_deref(uks);
+		}
+	}
 
 	mtx_unlock(&turndp()->mutex);
 
