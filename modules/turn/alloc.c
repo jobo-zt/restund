@@ -53,7 +53,7 @@ static void destructor(void *arg)
 	struct allocation *al = arg;
 
 	mtx_lock(&turndp()->mutex);
-	list_unlink(&al->le_map);
+	list_unlink(&al->uks->le);
 	mtx_unlock(&turndp()->mutex);
 
 	hash_flush(al->perms);
