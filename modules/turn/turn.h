@@ -39,7 +39,7 @@ struct chanlist;
 
 struct udp_socks{
 	struct le le;
-	int thrd_id;
+	thrd_t *thrd;
 	struct udp_sock *rel_us;
 	struct udp_sock *rsv_us;
 };

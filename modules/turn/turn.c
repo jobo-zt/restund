@@ -341,14 +341,11 @@ static void tmr_handler(void *arg)
 {
 	struct tmr *tmr = arg;
 	struct le *le;
-	int thrd_id;
 
 	mtx_lock(&turndp()->mutex);
 	if (!turndp()->run)
 		re_cancel();
-
-	thrd_id = GetThreadId(thrd_current());
-
+	
 	/* Reassign one allocation by time */
 	LIST_FOREACH(&turndp()->re_map, le)
 	{
@@ -356,7 +353,7 @@ static void tmr_handler(void *arg)
 		mtx_lock(&al->mutex);
 		udp_thread_attach(al->uks->rel_us);
 		udp_thread_attach(al->uks->rsv_us);
-		al->uks->thrd_id = thrd_id;
+		al->uks->thrd = thrd_current();
 		
 		mtx_unlock(&al->mutex);
 	}
@@ -367,7 +364,8 @@ static void tmr_handler(void *arg)
 	{
 		struct udp_socks *uks = list_ledata(le);
 		le = le->next;
-		if (thrd_id == uks->thrd_id) {
+
+		if (thrd_equal(uks->thrd, thrd_current())) {
 			udp_thread_detach(uks->rel_us);
 			udp_thread_detach(uks->rsv_us);
 			mem_deref(uks->rel_us);
@@ -484,6 +482,7 @@ static int module_init(void)
 	}
 
 	list_init(&turnd.re_map);
+	list_init(&turnd.rm_map);
 
 	turnd.run = true;
 	err = mtx_init(&turnd.mutex, mtx_plain);
@@ -493,8 +492,7 @@ static int module_init(void)
 	}
 
 	for (int i = 0; i < TURN_THREADS; i++) {
-		err = thrd_create(&tid[i], thread_handler,
-				   &timers[i]);
+		err = thrd_create(&tid[i], thread_handler, &timers[i]);
 		if (err) {
 			restund_error("turn: thrd_create err: %m\n", err);
 			goto out;
