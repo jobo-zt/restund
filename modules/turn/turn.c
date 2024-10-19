@@ -370,6 +370,8 @@ static void tmr_handler(void *arg)
 		if (thrd_id == uks->thrd_id) {
 			udp_thread_detach(uks->rel_us);
 			udp_thread_detach(uks->rsv_us);
+			mem_deref(uks->rel_us);
+			mem_deref(uks->rsv_us);
 
 			list_unlink(&uks->le);
 			mem_deref(uks);
