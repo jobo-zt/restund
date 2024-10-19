@@ -52,10 +52,6 @@ static void destructor(void *arg)
 {
 	struct allocation *al = arg;
 
-	mtx_lock(&turndp()->mutex);
-	list_unlink(&al->uks->le);
-	mtx_unlock(&turndp()->mutex);
-
 	hash_flush(al->perms);
 	mem_deref(al->perms);
 	mem_deref(al->chans);
