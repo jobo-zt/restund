@@ -32,6 +32,23 @@ struct turnd *turndp(void)
 	return &turnd;
 }
 
+static inline uintptr_t get_thread_id(void)
+{
+#if defined(WIN32)
+	return (uintptr_t)GetCurrentThreadId();
+#elif defined(LINUX)
+	return (uintptr_t)syscall(SYS_gettid);
+#elif defined(HAVE_PTHREAD)
+#if defined(DARWIN) || defined(FREEBSD) || defined(OPENBSD) || \
+	defined(NETBSD) || defined(DRAGONFLY)
+	return (uintptr_t)(void *)pthread_self();
+#else
+	return (uintptr_t)pthread_self();
+#endif
+#else
+	return 0;
+#endif
+}
 
 static bool hash_cmp_handler(struct le *le, void *arg)
 {
@@ -345,7 +362,7 @@ static void tmr_handler(void *arg)
 	mtx_lock(&turndp()->mutex);
 	if (!turndp()->run)
 		re_cancel();
-	
+
 	/* Reassign one allocation by time */
 	LIST_FOREACH(&turndp()->re_map, le)
 	{
@@ -353,8 +370,7 @@ static void tmr_handler(void *arg)
 		mtx_lock(&al->mutex);
 		udp_thread_attach(al->uks->rel_us);
 		udp_thread_attach(al->uks->rsv_us);
-		al->uks->thrd = thrd_current();
-		
+		al->uks->thrd_id = get_thread_id();
 		mtx_unlock(&al->mutex);
 	}
 	list_clear(&turndp()->re_map);
@@ -365,7 +381,24 @@ static void tmr_handler(void *arg)
 		struct udp_socks *uks = list_ledata(le);
 		le = le->next;
 
-		if (thrd_equal(uks->thrd, thrd_current())) {
+		uint64_t jif = tmr_jiffies_usec();
+		if (0 == turndp()->ts) 
+		{
+			turndp()->ts = jif;
+		}		
+
+		if ((jif - turndp()->ts) > 1000000) // 1s
+		{
+			restund_error("no processing for a long time, check thread has exited.");
+
+			mem_deref(uks->rel_us);
+			mem_deref(uks->rsv_us);
+			list_unlink(&uks->le);
+			mem_deref(uks);
+			turndp()->ts = 0;
+		}
+
+		if (uks->thrd_id == get_thread_id()) {
 			udp_thread_detach(uks->rel_us);
 			udp_thread_detach(uks->rsv_us);
 			mem_deref(uks->rel_us);
@@ -373,6 +406,7 @@ static void tmr_handler(void *arg)
 
 			list_unlink(&uks->le);
 			mem_deref(uks);
+			turndp()->ts = 0;
 		}
 	}
 
@@ -484,6 +518,7 @@ static int module_init(void)
 	list_init(&turnd.re_map);
 	list_init(&turnd.rm_map);
 
+	turnd.ts = 0;
 	turnd.run = true;
 	err = mtx_init(&turnd.mutex, mtx_plain);
 	if (err) {

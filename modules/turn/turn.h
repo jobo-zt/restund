@@ -21,6 +21,7 @@ struct turnd {
 	bool run;
 	struct list re_map;
 	struct list rm_map;
+	uint64_t ts;
 
 	struct {
 		uint64_t scode_400;
@@ -39,7 +40,7 @@ struct chanlist;
 
 struct udp_socks{
 	struct le le;
-	thrd_t *thrd;
+	uintptr_t thrd_id;
 	struct udp_sock *rel_us;
 	struct udp_sock *rsv_us;
 };
