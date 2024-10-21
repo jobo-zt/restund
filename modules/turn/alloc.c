@@ -61,6 +61,7 @@ static void destructor(void *arg)
 	mem_deref(al->username);
 	mem_deref(al->cli_sock);
 
+	udp_handler_set(al->uks->rel_us, NULL, NULL);
 	mtx_lock(&turndp()->mutex);
 	list_append(&turndp()->rm_map, &al->uks->le, al->uks);
 	mtx_unlock(&turndp()->mutex);
@@ -84,6 +85,9 @@ static void udp_recv(const struct sa *src, struct mbuf *mb, void *arg)
 	struct perm *perm;
 	struct chan *chan;
 	int err;
+
+	if (!al)
+		return;
 
 	if (al->proto == IPPROTO_TCP) {
 
