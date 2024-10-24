@@ -32,23 +32,6 @@ struct turnd *turndp(void)
 	return &turnd;
 }
 
-static inline uintptr_t get_thread_id(void)
-{
-#if defined(WIN32)
-	return (uintptr_t)GetCurrentThreadId();
-#elif defined(LINUX)
-	return (uintptr_t)syscall(SYS_gettid);
-#elif defined(HAVE_PTHREAD)
-#if defined(DARWIN) || defined(FREEBSD) || defined(OPENBSD) || \
-	defined(NETBSD) || defined(DRAGONFLY)
-	return (uintptr_t)(void *)pthread_self();
-#else
-	return (uintptr_t)pthread_self();
-#endif
-#else
-	return 0;
-#endif
-}
 
 static bool hash_cmp_handler(struct le *le, void *arg)
 {
@@ -361,21 +344,34 @@ static void tmr_handler(void *arg)
 
 	mtx_lock(&turndp()->mutex);
 	if (!turndp()->run)
+	{
 		re_cancel();
+		goto out;
+	}
+
+	struct list *re_map = &turndp()->re_map;
+	struct list *rm_map = &turndp()->rm_map;
+	if (!list_isempty(re_map) && (!list_isempty(rm_map)))
+	{
+		goto out;
+	}
+
+	thrd_t thrd = thrd_current();
 
 	/* Reassign one allocation by time */
-	LIST_FOREACH(&turndp()->re_map, le)
+	LIST_FOREACH(re_map, le)
 	{
 		struct allocation *al = list_ledata(le);
 		mtx_lock(&al->mutex);
 		udp_thread_attach(al->uks->rel_us);
 		udp_thread_attach(al->uks->rsv_us);
-		al->uks->thrd_id = get_thread_id();
+		al->uks->thrd = thrd;
+
 		mtx_unlock(&al->mutex);
 	}
-	list_clear(&turndp()->re_map);
+	list_clear(re_map);
 
-	le = list_head(&turndp()->rm_map);
+	le = list_head(rm_map);
 	while (le)
 	{
 		struct udp_socks *uks = list_ledata(le);
@@ -394,11 +390,12 @@ static void tmr_handler(void *arg)
 			mem_deref(uks->rel_us);
 			mem_deref(uks->rsv_us);
 			list_unlink(&uks->le);
+
 			mem_deref(uks);
 			turndp()->ts = 0;
 		}
 
-		if (uks->thrd_id == get_thread_id()) {
+		if (thrd_equal(uks->thrd, thrd)) {
 			udp_thread_detach(uks->rel_us);
 			udp_thread_detach(uks->rsv_us);
 			mem_deref(uks->rel_us);
@@ -410,6 +407,7 @@ static void tmr_handler(void *arg)
 		}
 	}
 
+out:
 	mtx_unlock(&turndp()->mutex);
 
 	tmr_start(tmr, 10, tmr_handler, tmr);
